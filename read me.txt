@@ -1,0 +1,54 @@
+spacy: de_core_news_md
+https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl
+https://github.com/amirali78kh/link-downloader/tree/main/downloads/de_core_news_md-3.8.0-py3-none-any
+
+__________
+PDF → Text → NLP → CEFR estimate
+                     ↓
+            Find words > (A1,A2,B1,B2,C1)
+                     ↓
+        Get contextual meaning
+                     ↓
+           Generate annotated file
+__________
+project/
+│
+├── pdf_reader.py [X]
+├── nlp_processor.py
+├── cefr_classifier.py
+├── word_difficulty.py
+├── dictionary_lookup.py
+├── output_writer.py
+└── main.py
+__________
+wordnet "odenet-1.4" and "oewn-2025" install:
+```bash
+python -c "import wn; wn.add(r'.\odenet-1.4'); wn.add(r'.\oewn-2025')"
+```
+__________
+for CEFR excel:
+1. you have to know the "stem" of a verb [X]
+2. all the umlauts should be replaced with no umlaut [X]
+
+3. for nouns, some of them that ends with "-en" or "-er" or "-e", end of them are deleted
+(write a code that if a word with these ending wasnt found, try finding wihout them. )
+( possibly "-keit", "-lein", "-ismus", "-haft" , "-bar" , "-ell" and "-ens") [X]
+
+4. I should delete the particles and prepositions ( unless they are part of the verb)[X]
+__________
+Translate all the noun or verbs or adjectives that are not listed in the cefr level file.[X]
+
+in translation, if a word had no meanings, split it and translate the two words.[X]
+__________
+Entities: using "LOC" as a protect_label is kind of risky. consider deleting it later.[X]
+__________
+first get all the pages tokens ( with spacy ) and then calculate the status bar.
+__________
+Tasks: 
+1. compound words [X]
+2. be aware that no word in a sentence repeats.[X]
+3. get_meaningful_words : lemmatize every word that splits into it[X]
+4. give the option of choosing the spacy model in the UI
+5. get the gender of nouns and write it.
+6. add venv
+7. work with de_dep_news_trf (deepseek)
