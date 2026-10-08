@@ -44,8 +44,8 @@ class komaki_deutsch:
         self.json_file_name = f"{self.file_name_only}_KD_{cefr_to_letter[cefrlevel]}.json"
         self.docx_file_name = f"{self.file_name_only}_KD_{cefr_to_letter[cefrlevel]}.docx"
 
-        self.nlp = spacy.load("de_core_news_md")
-        # self.nlp = spacy.load("de_core_news_lg")
+        # self.nlp = spacy.load("de_core_news_md")
+        self.nlp = spacy.load("de_core_news_lg")
         # self.nlp = spacy.load("de_dep_news_trf")
 
         if file_name.endswith(".pdf"):
@@ -73,11 +73,105 @@ class komaki_deutsch:
         # 6/10 of text font size 
         self.dict_font_size = 9
         
+        # Deutsch Gothic - Tannenberg Fett
+        self.text_font = "sabon"
+        self.dict_font = ""
+        
     def get_pdf_pages(self):
         name = f"{self.dir}\{self.file_full_name}"
         doc = pymupdf.open(name)
         return doc
 
+    
+    def get_best_synset(self, target_word,chosen_sentence,synsets):
+        target_word_synsets = synsets
+
+        def get_contexual_words(text:str,target_word:str = None):
+            if target_word != None:
+                target_word = target_word.lower()
+            doc = self.nlp(text)
+            contexual_arr= []
+            for token in doc:
+                if token.is_stop or token.is_punct or token.is_space or token.text.lower() == target_word:
+                    continue
+
+                word_lemma = token.lemma_
+
+                if token.pos_ == "VERB":
+                    for child in token.children:
+                        if child.dep_ == "svp":
+                            word_lemma = child.text+token.lemma_
+                contexual_arr.append(word_lemma)
+            return contexual_arr
+
+
+
+        contextual_words = get_contexual_words(chosen_sentence,target_word)
+
+        synset_dic = {}
+        for target_word_synset in target_word_synsets:
+            synset_dic[target_word_synset] = 0
+        # print(contextual_words)
+        #----------Step 1-----------
+        for contextual_word in contextual_words:
+            # print(contextual_word)####
+            best_score = 0
+            best_sense = None
+            for target_word_synset in target_word_synsets:
+                synset_definition = target_word_synset.definition()
+                contexual_word_doc = self.nlp(contextual_word)
+                #----------Extra step----------
+                # placeholder = get_contexual_words(synset_definition)
+                # synset_definition_contexual = " ".join(placeholder)
+                # synset_doc = nlp(synset_definition_contexual)
+                #----------Extra step----------
+                if not synset_definition:
+                    continue
+                synset_doc = self.nlp(synset_definition)
+                synset_score = synset_doc.similarity(contexual_word_doc)
+                if synset_score > best_score or best_score == 0:
+                    best_score = synset_score
+                    best_sense = target_word_synset
+            if best_score != 0:
+                synset_dic[best_sense] += 1
+                # print(f"first: {contextual_word}: {best_sense.definition()}")
+        #----------Step 1-----------
+        #----------Step 2-----------
+        items = sorted(synset_dic.items(), key=lambda x: x[1], reverse=True)
+            
+            # If true, the values are the same
+        if len(items) >= 2 and items[0][1] == items[1][1]:
+            
+            for contextual_word in contextual_words:
+                best_score = 0
+                best_sense = None
+                for target_word_synset in target_word_synsets:
+                    synset_definition = target_word_synset.definition()
+                    if not synset_definition:
+                        continue
+                    #----------Extra step----------
+                    placeholder = get_contexual_words(synset_definition)
+                    synset_definition_contexual = " ".join(placeholder)
+                    synset_doc = self.nlp(synset_definition_contexual)
+                    #----------Extra step----------
+                    # synset_doc = nlp(synset_definition)
+                    contexual_word_doc = self.nlp(contextual_word)
+                    synset_score = synset_doc.similarity(contexual_word_doc)
+                    if synset_score > best_score or best_score == 0:
+                        best_score = synset_score
+                        best_sense = target_word_synset
+                if best_score != 0:
+                    synset_dic[best_sense] += 1
+                    # print(f"second:{contextual_word} {best_sense.definition()}")
+            items = sorted(synset_dic.items(), key=lambda x: x[1], reverse=True)
+            result = items[0][0]
+        else:
+            result = items[0][0]
+        print(f"{result.definition()}\n----------")
+        return result
+        #----------Step 2-----------
+    
+    
     def clean_extracted_text(self, text):
         if not text:
             return ""
@@ -286,12 +380,24 @@ class komaki_deutsch:
                     return child.text
         return None
     
+    
     def word_splitter(self,word):
         splitter = Splitter()
         splitted_words = splitter.split_compound(word)[0]
         return splitted_words
     
     def get_best_definition (self, sentence: str, target_word):
+
+        morph = ""
+        morph_mapping = {
+        "Masc": "[m]",
+        "Fem": "[f]",
+        "Neut": "[n]"
+        }
+        genders = target_word.morph.get("Gender")
+        if target_word.pos_ == "NOUN" and genders:
+            gender = target_word.morph.get("Gender")[0]
+            morph = morph_mapping[gender]
 
         SPACY_TO_ODENET_POS = {
         "NOUN": "n",
@@ -317,6 +423,7 @@ class komaki_deutsch:
 
         context_doc = self.nlp(sentence)
 
+        #__________Compound words__________
         if not synsets:
             if len(self.get_meaningful_words(target_word)) > 1:
                 # print(len(self.get_meaningful_words(target_word)))
@@ -333,11 +440,14 @@ class komaki_deutsch:
 
                     mw_synsets = self.de.synsets(meaningful_word)
                     for mw_synset in mw_synsets:
+                        similarity = 0
                         mw_definition = mw_synset.definition()
                         if mw_definition == None:
                             continue
                         mw_doc = self.nlp(mw_definition)
                         similarity = context_doc.similarity(mw_doc)
+                        if not similarity:
+                            similarity = 0
                         if best_score < similarity:
                             best_score = similarity
                             best_synset = mw_synset
@@ -366,43 +476,57 @@ class komaki_deutsch:
                     "de_meaning": best_definition,
                     "en_meaning": en_definition,
                     "searchable_word":searchable_word,
-                    "en_lemma":en_lemma
+                    "en_lemma":en_lemma,
+                    "morph": morph
                 }
                 #__________COMPOUND WORDS__________   
             else:
                 return None 
+        #__________Compound words__________
         
         # Get context words (exclude target word)
         # context_words = [token.text.lower() for token in doc if token.text.lower() != target_word.lower()]
         # context_text = " ".join(context_words)
         # context_doc = self.nlp(context_text)
         
-        # Score each synset based on definition similarity
+        #__________Normal words__________
         best_synset = None
         best_score = -1
         best_definition = ""
         
-        for synset in synsets:
-            odenet_pos = synset.pos
-            if token_pos == "n" or token_pos == "a" or token_pos == "v":
-                print(f"{searchable_word} {odenet_pos} / {token_pos}")
-                if synset.pos != token_pos:
-                    print("Ignored!")
-                    continue
-            definition = synset.definition()
-            if definition == None:
-                continue
-            def_doc = self.nlp(definition)
+        # for synset in synsets:
+        #     similarity = 0
+        #     odenet_pos = synset.pos
+        #     if token_pos == "n" or token_pos == "a" or token_pos == "v":
+        #         print(f"{searchable_word} {odenet_pos} / {token_pos}")
+        #         if synset.pos != token_pos:
+        #             # print("Ignored!")
+        #             continue
+        #     definition = synset.definition()
+        #     if definition == None:
+        #         continue
             
-            # Calculate similarity between context and definition
-            if context_doc.has_vector and def_doc.has_vector:
-                similarity = context_doc.similarity(def_doc)
+        #     synset_examples = synset.examples()
+        #     if synset_examples:
+        #         ex_sim_sum = 0
+        #         for ex_num, synset_example in enumerate(synset_examples):
+        #             ex_doc = self.nlp(synset_example)
+        #             ex_sim_sum += context_doc.similarity(ex_doc)
+        #         similarity = ex_sim_sum/(ex_num+1)
+
+        #     else:
+        #         def_doc = self.nlp(definition)
+
+        #         # Calculate similarity between context and definition
+        #         if context_doc.has_vector and def_doc.has_vector:
+        #             similarity = context_doc.similarity(def_doc)
                 
-                if similarity > best_score:
-                    best_score = similarity
-                    best_synset = synset
-                    best_definition = definition
+        #         if similarity > best_score:
+        #             best_score = similarity
+        #             best_synset = synset
+        #             best_definition = definition
         
+        best_synset = self.get_best_synset(target_word,sentence,synsets)
         if best_synset:
             en_synsets = best_synset.translate("oewn:2025")
             if en_synsets:
@@ -425,9 +549,11 @@ class komaki_deutsch:
                 "de_meaning": best_definition,
                 "en_meaning": en_definition,
                 "searchable_word":searchable_word,
-                "en_lemma":en_lemma
+                "en_lemma":en_lemma,
+                "morph": morph
             }
         return None
+        #__________Normal words__________
     
     def word_splitter(self, word):
         """Split a German compound word."""
@@ -491,6 +617,7 @@ class komaki_deutsch:
             for word in words:
                 run = paragraph.add_run(word + " ")
                 run.font.size = Pt(self.text_font_size)
+                run.font.name = self.text_font
                 #Change#1
                 # print(word)
                 # print(bold_words)
@@ -537,7 +664,9 @@ class komaki_deutsch:
                         # making the difficult words bold
                         # run_word = para.add_run(f"{wrd}").bold = True
                         
-                        run_word = para.add_run(wrd["word"]) #=> word
+                        wrd_morph = wrd["morph"]
+                        wrd_wrd = wrd["word"]
+                        run_word = para.add_run(f"{wrd_wrd}{wrd_morph}") #=> word
                         run_word.font.size = Pt(self.dict_font_size)
                         run_word.bold = True
                         
@@ -551,10 +680,12 @@ class komaki_deutsch:
             main_para = docx.add_paragraph()
             run_main = main_para.add_run(sents)
             run_main.font.size = Pt(self.text_font_size)
+            run_main.font.name = self.text_font
         # print("ta inja ok")
         # docx.save("kir.docx")
         # print(f"{self.dir}/{self.docx_file_name}")
         docx.save(f"{self.dir}\{self.docx_file_name}")
+
 
     
     #__________MAKING PROCESSED FILES__________
@@ -577,8 +708,10 @@ if __name__ == "__main__":
     # file_name = r"D:\Python Projects\Komaki_deutsch\few_sents.pdf"
     # file_name = "sentence.pdf"
     # file_name = r"D:\Python Projects\Komaki_deutsch\example.pdf"
-    file_name = r"D:\Python Projects\Komaki_deutsch\german_example.pdf"
+    # file_name = r"D:\Python Projects\Komaki_deutsch\german_example.pdf"
     # file_name = r"D:\Python Projects\Komaki_deutsch\test.pdf"
+    # file_name = r"D:\Python Projects\Komaki_deutsch\100G.pdf")
+    file_name = r"D:\Python Projects\Komaki_deutsch\Kinder- und Hausmärchen (Ps 33-137 ).pdf"
     book = komaki_deutsch(file_name,2)
     book.make_dictionary()
     print("making dictionary done!")
